@@ -22,13 +22,11 @@ TimeService::TimeService()
       stopwatchAccumulatedMs_(0U),
       stopwatchElapsedMs_(0U),
       stopwatchLastSecondBoundary_(0U),
-      stopwatchLastTickMs_(0U),
       stopwatchState_(StopwatchState::STOPPED),
       countdownInitialMs_(0U),
       countdownRemainingMs_(0U),
       countdownBaseMs_(0U),
       countdownStartMs_(0U),
-      countdownLastTickMs_(0U),
       countdownState_(CountdownState::IDLE)
 {
 }
@@ -140,7 +138,6 @@ StatusCode TimeService::stopwatchStart()
 
     stopwatchStartMs_ = nowMs();
     stopwatchLastSecondBoundary_ = 0U;
-    stopwatchLastTickMs_ = lastSecondTickMs_;
     if (stopwatchState_ == StopwatchState::PAUSED)
     {
         stopwatchState_ = StopwatchState::RUNNING;
@@ -185,7 +182,6 @@ StatusCode TimeService::stopwatchReset()
     stopwatchAccumulatedMs_ = 0U;
     stopwatchElapsedMs_ = 0U;
     stopwatchLastSecondBoundary_ = 0U;
-    stopwatchLastTickMs_ = lastSecondTickMs_;
     stopwatchState_ = StopwatchState::STOPPED;
     return StatusCode::OK;
 }
@@ -221,7 +217,6 @@ StatusCode TimeService::countdownSet(const TimeValue& value)
     countdownRemainingMs_ = countdownInitialMs_;
     countdownBaseMs_ = countdownInitialMs_;
     countdownStartMs_ = nowMs();
-    countdownLastTickMs_ = lastSecondTickMs_;
     countdownState_ = CountdownState::IDLE;
     return StatusCode::OK;
 }
@@ -248,7 +243,6 @@ StatusCode TimeService::countdownStart()
 
     countdownBaseMs_ = countdownRemainingMs_;
     countdownStartMs_ = nowMs();
-    countdownLastTickMs_ = lastSecondTickMs_;
     countdownState_ = CountdownState::RUNNING;
     return StatusCode::OK;
 }
@@ -283,7 +277,6 @@ StatusCode TimeService::countdownReset()
     countdownRemainingMs_ = 0U;
     countdownBaseMs_ = 0U;
     countdownStartMs_ = 0U;
-    countdownLastTickMs_ = lastSecondTickMs_;
     countdownState_ = CountdownState::IDLE;
     return StatusCode::OK;
 }
@@ -395,14 +388,10 @@ void TimeService::refreshStopwatchState()
         return;
     }
 
-    // Advance only when TimeService creates its one-second tick. This keeps
-    // stopwatch/countdown changes phase-locked to the front-panel tick LED.
-    while ((uint32_t)(lastSecondTickMs_ - stopwatchLastTickMs_) >= kSecondTickMs)
-    {
-        stopwatchLastTickMs_ += kSecondTickMs;
-        stopwatchAccumulatedMs_ += kSecondTickMs;
-    }
-    stopwatchElapsedMs_ = stopwatchAccumulatedMs_;
+    const uint32_t now = nowMs();
+    const uint32_t elapsedMs = now - stopwatchStartMs_;
+    // ponytail: round down to complete seconds only (no milliseconds kept)
+    stopwatchElapsedMs_ = stopwatchAccumulatedMs_ + ((elapsedMs / kSecondTickMs) * kSecondTickMs);
 
     if (stopwatchElapsedMs_ >= kStopwatchMaxMs)
     {
@@ -419,17 +408,17 @@ void TimeService::refreshCountdownState()
         return;
     }
 
-    while ((uint32_t)(lastSecondTickMs_ - countdownLastTickMs_) >= kSecondTickMs)
+    const uint32_t now = nowMs();
+    const uint32_t elapsedMs = now - countdownStartMs_;
+    
+    if (elapsedMs >= countdownBaseMs_)
     {
-        countdownLastTickMs_ += kSecondTickMs;
-        if (countdownRemainingMs_ <= kSecondTickMs)
-        {
-            countdownRemainingMs_ = 0U;
-            countdownState_ = CountdownState::COMPLETED;
-            publishEvent(EventType::TIMER_STOP, EventSource::TIMER, 0);
-            return;
-        }
-
-        countdownRemainingMs_ -= kSecondTickMs;
+        countdownRemainingMs_ = 0U;
+        countdownState_ = CountdownState::COMPLETED;
+        publishEvent(EventType::TIMER_STOP, EventSource::TIMER, 0);
+        return;
     }
+
+    // ponytail: round down elapsed to complete seconds only
+    countdownRemainingMs_ = countdownBaseMs_ - ((elapsedMs / kSecondTickMs) * kSecondTickMs);
 }

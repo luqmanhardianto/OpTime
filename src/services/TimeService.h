@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "common/Status.h"
+#include "core/EventSystem.h"
 #include "drivers/RtcDriver.h"
 #include "scheduler/Scheduler.h"
 
@@ -34,12 +35,13 @@ class TimeService
 public:
     TimeService();
 
-    StatusCode begin(RtcDriver& rtcDriver, Scheduler& scheduler);
+    StatusCode begin(RtcDriver* rtcDriver, Scheduler* scheduler, EventSystem* eventSystem);
     void update();
 
     StatusCode setDateTime(const DateTime& time);
     StatusCode getDateTime(DateTime& time) const;
     bool isRtcValid() const;
+    uint32_t nowMs() const;
 
     StatusCode stopwatchStart();
     StatusCode stopwatchStop();
@@ -68,24 +70,28 @@ private:
     static bool isValidDateTime(const DateTime& time);
 
     void syncRtc();
+    void publishEvent(EventType type, EventSource source, int16_t value);
     void refreshStopwatchState();
     void refreshCountdownState();
 
     RtcDriver* rtcDriver_;
     Scheduler* scheduler_;
+    EventSystem* eventSystem_;
     DateTime currentTime_;
     bool rtcValid_;
     uint32_t monotonicMs_;
     uint32_t lastRtcSyncMs_;
     uint32_t lastSecondTickMs_;
 
+    uint32_t stopwatchStartMs_;
     uint32_t stopwatchAccumulatedMs_;
     uint32_t stopwatchElapsedMs_;
-    uint32_t stopwatchLastTickMs_;
+    uint32_t stopwatchLastSecondBoundary_;
     StopwatchState stopwatchState_;
 
     uint32_t countdownInitialMs_;
     uint32_t countdownRemainingMs_;
-    uint32_t countdownLastTickMs_;
+    uint32_t countdownBaseMs_;
+    uint32_t countdownStartMs_;
     CountdownState countdownState_;
 };
