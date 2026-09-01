@@ -1,0 +1,23 @@
+# PlatformIO
+.pio/
+
+# VS Code
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.elf
+*.hex
+*.bin
+*.map
+
+# Temporary files
+*.tmp
+*.log
+
+# Python cache
+__pycache__/
+*.pyc

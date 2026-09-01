@@ -1,0 +1,8 @@
+#pragma once
+
+#include "../../generated/BuildInfo.h"
+
+#define FW_MAJOR_VERSION FW_VERSION_MAJOR
+#define FW_MINOR_VERSION FW_VERSION_MINOR
+#define FW_PATCH_VERSION FW_VERSION_PATCH
+#define FW_VERSION_BUILD_NUMBER FW_VERSION_BUILD
