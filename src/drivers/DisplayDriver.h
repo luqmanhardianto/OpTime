@@ -31,6 +31,7 @@ private:
     ShiftRegisterDriver shiftRegister_;
     uint8_t currentDigit_;
     uint8_t brightnessLevel_;
+    uint8_t refreshCounter_;
     bool colonEnabled_;
     bool initialized_;
 

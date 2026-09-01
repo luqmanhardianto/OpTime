@@ -53,7 +53,8 @@ StatusCode DisplayDriver::begin()
 {
     initialized_ = false;
     currentDigit_ = 0U;
-    brightnessLevel_ = 0U;
+    refreshCounter_ = 0U;
+    brightnessLevel_ = 100U;
     colonEnabled_ = false;
 
     for (uint8_t i = 0; i < kBufferSize; ++i)
@@ -196,6 +197,7 @@ void DisplayDriver::refreshDirect()
     {
         index = 0U;
         currentDigit_ = 0U;
+        refreshCounter_ = 0U;
     }
 
     const uint8_t digitValue = frontBuffer_[index];
@@ -211,8 +213,21 @@ void DisplayDriver::refreshDirect()
     shiftRegister_.setOutputEnable(false);
     shiftRegister_.shiftOut(segmentData, digitData);
     shiftRegister_.latch();
-    shiftRegister_.setOutputEnable(true);
 
+    // Apply brightness control via duty cycle
+    // Only enable display if within brightness threshold
+    // Brightness = (refreshCounter < kBufferSize * brightnessLevel / 100) ? ON : OFF
+    uint16_t brightnessCycles = (static_cast<uint16_t>(kBufferSize) * brightnessLevel_) / 100U;
+    if (refreshCounter_ < brightnessCycles)
+    {
+        shiftRegister_.setOutputEnable(true);
+    }
+    else
+    {
+        shiftRegister_.setOutputEnable(false);
+    }
+
+    refreshCounter_++;
     if (currentDigit_ >= (kBufferSize - 1U))
     {
         currentDigit_ = 0U;
