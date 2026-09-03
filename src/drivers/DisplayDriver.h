@@ -12,6 +12,7 @@ public:
     StatusCode begin();
     void enableRefresh();
     void disableRefresh();
+    bool isRefreshEnabled() const;
 
     void setDigit(uint8_t index, uint8_t value);
     void setTime(uint8_t hour, uint8_t minute, uint8_t second);
@@ -33,7 +34,8 @@ private:
     uint8_t currentDigit_;
     uint8_t brightnessLevel_;
     bool colonEnabled_;
-    bool initialized_;
+    volatile bool initialized_;
+    volatile bool refreshEnabled_;
 
     uint8_t digitMaskForIndex(uint8_t index) const;
     uint8_t segmentValueForDigit(uint8_t value) const;

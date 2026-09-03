@@ -2,6 +2,7 @@
 
 #include "app/ModeManager.h"
 #include "bsp/BoardConfig.h"
+#include "config/DiagnosticConfig.h"
 #include "core/EventSystem.h"
 #include "drivers/ButtonDriver.h"
 #include "drivers/DisplayDriver.h"
@@ -388,6 +389,18 @@ bool gCountdownCompletionAlarmActive = false;
 uint32_t gCountdownCompletionAlarmStartMs = 0U;
 CountdownState gPreviousCountdownState = CountdownState::IDLE;
 
+#if OPTIME_TIMER1_DIAGNOSTIC
+enum class Timer1DiagnosticState : uint8_t
+{
+    MEASURING = 0U,
+    COMPLETE
+};
+
+Timer1DiagnosticState gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
+uint32_t gTimer1DiagnosticStartMs = 0U;
+constexpr uint32_t kTimer1DiagnosticDurationMs = 60000UL;
+#endif
+
 // Stopwatch value tracking for precise serial print timing
 TimeValue gLastPrintedStopwatch = {0U, 0U, 0U};
 StopwatchState gLastPrintedStopwatchState = StopwatchState::STOPPED;
@@ -576,6 +589,34 @@ void resetCountdownOnModeExit()
     Serial.println("COUNTDOWN reset on mode exit");
 }
 
+#if OPTIME_TIMER1_DIAGNOSTIC
+void beginTimer1Diagnostic()
+{
+    gSystemEnabled = true;
+    (void)gModeManager.setMode(ot::AppMode::STOPWATCH);
+    (void)gTimeService.stopwatchReset();
+    (void)gTimeService.stopwatchStart();
+    gDisplayDriver.disableRefresh();
+    gTimer1DiagnosticStartMs = ::millis();
+    gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
+}
+
+void processTimer1Diagnostic()
+{
+    gScheduler.run();
+    gTimeService.update();
+
+    if ((uint32_t)(::millis() - gTimer1DiagnosticStartMs) < kTimer1DiagnosticDurationMs)
+    {
+        return;
+    }
+
+    gDisplayDriver.enableRefresh();
+    gTimer1DiagnosticState = Timer1DiagnosticState::COMPLETE;
+    updateHardwareDisplay();
+}
+#endif
+
 void setSystemOff()
 {
     gSystemEnabled = false;
@@ -630,11 +671,21 @@ void setup()
     (void)gTimeService.begin(&gRtcDriver, &gScheduler, &gEventSystem);
 
     setSystemOff();
+#if OPTIME_TIMER1_DIAGNOSTIC
+    beginTimer1Diagnostic();
+#endif
     Serial.println("Waiting for POWER button to activate system...");
 }
 
 void loop()
 {
+#if OPTIME_TIMER1_DIAGNOSTIC
+    if (gTimer1DiagnosticState == Timer1DiagnosticState::MEASURING)
+    {
+        processTimer1Diagnostic();
+        return;
+    }
+#endif
     gButtonDriver.update();
 
     ButtonEvent buttonEvent;

@@ -5,6 +5,7 @@
 #include <avr/io.h>
 #include <util/atomic.h>
 
+#include "config/DiagnosticConfig.h"
 #include "config/PinConfig.h"
 
 namespace
@@ -44,18 +45,32 @@ void initTimer1ForDisplay()
 
 ISR(TIMER1_COMPA_vect)
 {
-    if (gDisplayDriver != nullptr)
+    if (gDisplayDriver == nullptr)
     {
-        gDisplayDriver->refreshISR();
+        return;
     }
+#if OPTIME_TIMER1_DIAGNOSTIC
+    if (!gDisplayDriver->isRefreshEnabled())
+    {
+        return;
+    }
+#endif
+    gDisplayDriver->refreshISR();
 }
 
 ISR(TIMER1_COMPB_vect)
 {
-    if (gDisplayDriver != nullptr)
+    if (gDisplayDriver == nullptr)
     {
-        gDisplayDriver->refreshBrightnessISR();
+        return;
     }
+#if OPTIME_TIMER1_DIAGNOSTIC
+    if (!gDisplayDriver->isRefreshEnabled())
+    {
+        return;
+    }
+#endif
+    gDisplayDriver->refreshBrightnessISR();
 }
 
 StatusCode DisplayDriver::begin()
@@ -64,6 +79,7 @@ StatusCode DisplayDriver::begin()
     currentDigit_ = 0U;
     brightnessLevel_ = 75U;
     colonEnabled_ = false;
+    refreshEnabled_ = false;
 
     for (uint8_t i = 0; i < kBufferSize; ++i)
     {
@@ -103,15 +119,23 @@ void DisplayDriver::enableRefresh()
     }
 
     initTimer1ForDisplay();
+    refreshEnabled_ = true;
 }
 
 void DisplayDriver::disableRefresh()
 {
     noInterrupts();
+    refreshEnabled_ = false;
     TIMSK1 = 0U;
     TCCR1B = 0U;
     TCNT1 = 0U;
+    shiftRegister_.setOutputEnable(false);
     interrupts();
+}
+
+bool DisplayDriver::isRefreshEnabled() const
+{
+    return refreshEnabled_;
 }
 
 void DisplayDriver::setDigit(uint8_t index, uint8_t value)
@@ -207,6 +231,8 @@ void DisplayDriver::refreshDirect()
         currentDigit_ = 0U;
     }
 
+    // Direct PORTB transfers keep the normal COMPA ISR short; estimated
+    // worst-case execution is approximately 10-20 us at 16 MHz.
     const uint8_t digitValue = frontBuffer_[index];
     const uint8_t pattern = segmentValueForDigit(digitValue);
 
