@@ -9,5 +9,5 @@
 // Diagnostic reports are sent after the measurement; normal firmware remains silent.
 #define OPTIME_TIMER1_DIAGNOSTIC_SERIAL 1
 
-// Use 1800000UL for the optional 30-minute measurement.
-#define OPTIME_TIMER1_DIAGNOSTIC_DURATION_MS 600000UL
+// Use 600000UL for 10 minutes or 3600000UL for 60 minutes.
+#define OPTIME_TIMER1_DIAGNOSTIC_DURATION_MS 1800000UL

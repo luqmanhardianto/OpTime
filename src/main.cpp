@@ -1,4 +1,6 @@
 #include "Arduino.h"
+#include <avr/io.h>
+#include <stdlib.h>
 
 #include "app/ModeManager.h"
 #include "bsp/BoardConfig.h"
@@ -9,6 +11,98 @@
 #include "drivers/RtcDriver.h"
 #include "scheduler/Scheduler.h"
 #include "services/TimeService.h"
+
+#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+class DiagnosticSerial
+{
+public:
+    void begin(const uint32_t baudRate)
+    {
+        const uint16_t divisor = static_cast<uint16_t>((F_CPU / (16UL * baudRate)) - 1UL);
+        UBRR0H = static_cast<uint8_t>(divisor >> 8U);
+        UBRR0L = static_cast<uint8_t>(divisor & 0xFFU);
+        UCSR0A = 0U;
+        UCSR0B = _BV(TXEN0);
+        UCSR0C = _BV(UCSZ01) | _BV(UCSZ00);
+    }
+
+    void print(const char* text)
+    {
+        while (*text != '\0')
+        {
+            writeByte(*text++);
+        }
+    }
+
+    void print(const uint32_t value)
+    {
+        char buffer[11];
+        utoa(value, buffer, 10);
+        print(buffer);
+    }
+
+    void print(const uint8_t value)
+    {
+        print(static_cast<uint32_t>(value));
+    }
+
+    void print(const uint16_t value)
+    {
+        print(static_cast<uint32_t>(value));
+    }
+
+    void print(const int32_t value)
+    {
+        char buffer[12];
+        ltoa(value, buffer, 10);
+        print(buffer);
+    }
+
+    void println()
+    {
+        print("\r\n");
+    }
+
+    void println(const char* text)
+    {
+        print(text);
+        println();
+    }
+
+    void println(const uint32_t value)
+    {
+        print(value);
+        println();
+    }
+
+    void println(const uint8_t value)
+    {
+        print(value);
+        println();
+    }
+
+    void println(const uint16_t value)
+    {
+        print(value);
+        println();
+    }
+
+    void println(const int32_t value)
+    {
+        print(value);
+        println();
+    }
+
+private:
+    void writeByte(const char value)
+    {
+        while ((UCSR0A & _BV(UDRE0)) == 0U)
+        {
+        }
+        UDR0 = static_cast<uint8_t>(value);
+    }
+};
+#endif
 
 class DisabledSerial
 {
@@ -26,7 +120,9 @@ public:
 
 namespace
 {
-#if !OPTIME_TIMER1_DIAGNOSTIC || !OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+DiagnosticSerial gDiagnosticSerial;
+#else
 DisabledSerial gDisabledSerial;
 #endif
 const uint8_t kPowerLedPin = Board::Pin::POWER_LED;
@@ -35,7 +131,9 @@ constexpr uint32_t kCountdownCompletionToneMs = 3000U;
 constexpr uint8_t kDisplayBlankDigit = 0xFFU;
 constexpr uint32_t kEditFieldBlinkPeriodMs = 500U;
 TimeService gTimeService;
-#if !OPTIME_TIMER1_DIAGNOSTIC || !OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#define Serial gDiagnosticSerial
+#else
 #define Serial gDisabledSerial
 #endif
 
@@ -402,6 +500,8 @@ enum class Timer1DiagnosticState : uint8_t
 
 Timer1DiagnosticState gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
 uint32_t gTimer1DiagnosticStartMs = 0U;
+DateTime gTimer1DiagnosticStartRtc = {0U, 0U, 0U, 0U, 1U, 1U, 2000U};
+bool gTimer1DiagnosticStartRtcValid = false;
 constexpr uint32_t kTimer1DiagnosticDurationMs = OPTIME_TIMER1_DIAGNOSTIC_DURATION_MS;
 #endif
 
@@ -594,21 +694,44 @@ void resetCountdownOnModeExit()
 }
 
 #if OPTIME_TIMER1_DIAGNOSTIC
+uint32_t timerDiagnosticSecondsOfDay(const DateTime& time)
+{
+    return (static_cast<uint32_t>(time.hour) * 3600UL) +
+           (static_cast<uint32_t>(time.minute) * 60UL) +
+           static_cast<uint32_t>(time.second);
+}
+
+uint32_t timerDiagnosticRtcElapsedSeconds(const DateTime& start, const DateTime& end)
+{
+    const uint32_t startSeconds = timerDiagnosticSecondsOfDay(start);
+    const uint32_t endSeconds = timerDiagnosticSecondsOfDay(end);
+    if (endSeconds >= startSeconds)
+    {
+        return endSeconds - startSeconds;
+    }
+
+    return (86400UL - startSeconds) + endSeconds;
+}
+
 void beginTimer1Diagnostic()
 {
     gSystemEnabled = true;
     (void)gModeManager.setMode(ot::AppMode::STOPWATCH);
     (void)gTimeService.stopwatchReset();
+    gTimer1DiagnosticStartRtcValid = (gRtcDriver.read(gTimer1DiagnosticStartRtc) == StatusCode::OK);
+    gTimer1DiagnosticStartMs = ::millis();
     (void)gTimeService.stopwatchStart();
 #if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
     gDisplayDriver.disableRefresh();
 #endif
-    gTimer1DiagnosticStartMs = ::millis();
     gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
 
     Serial.println("TIMER1 DIAGNOSTIC START");
     Serial.print("F_CPU = ");
     Serial.println(F_CPU);
+    Serial.print("RTC start = ");
+    printTimeHhMmSs(gTimer1DiagnosticStartRtc);
+    Serial.println();
 #if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
     Serial.println("Timer1 = OFF");
 #else
@@ -626,8 +749,23 @@ void processTimer1Diagnostic()
         return;
     }
 
-    const uint32_t millisElapsed = ::millis() - gTimer1DiagnosticStartMs;
+    const uint32_t endMillis = ::millis();
+    DateTime endRtc = {0U, 0U, 0U, 0U, 1U, 1U, 2000U};
+    const bool endRtcValid = (gRtcDriver.read(endRtc) == StatusCode::OK);
+    const uint32_t millisElapsed = endMillis - gTimer1DiagnosticStartMs;
     const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedMilliseconds();
+    const uint32_t rtcElapsedSeconds =
+        (gTimer1DiagnosticStartRtcValid && endRtcValid)
+            ? timerDiagnosticRtcElapsedSeconds(gTimer1DiagnosticStartRtc, endRtc)
+            : 0U;
+    const uint32_t rtcElapsedMs = rtcElapsedSeconds * 1000UL;
+    const int32_t millisDifference = static_cast<int32_t>(millisElapsed - rtcElapsedMs);
+    const int32_t stopwatchDifference = static_cast<int32_t>(stopwatchElapsed - rtcElapsedMs);
+    const uint32_t absoluteMillisDifference =
+        millisDifference < 0 ? static_cast<uint32_t>(-millisDifference)
+                             : static_cast<uint32_t>(millisDifference);
+    const uint32_t errorFraction =
+        rtcElapsedMs == 0U ? 0U : (absoluteMillisDifference * 1000000UL) / rtcElapsedMs;
 
 #if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
     gDisplayDriver.enableRefresh();
@@ -636,14 +774,44 @@ void processTimer1Diagnostic()
     updateHardwareDisplay();
 
     Serial.println("DIAGNOSTIC");
+    Serial.print("RTC start: ");
+    printTimeHhMmSs(gTimer1DiagnosticStartRtc);
+    Serial.println();
+    Serial.print("RTC end: ");
+    printTimeHhMmSs(endRtc);
+    Serial.println();
+    Serial.println("RTC resolution: +/-1 second");
     Serial.print("Expected ms: ");
     Serial.println(kTimer1DiagnosticDurationMs);
     Serial.print("millis ms: ");
     Serial.println(millisElapsed);
+    Serial.print("RTC seconds: ");
+    Serial.println(rtcElapsedSeconds);
+    Serial.print("millis - RTC ms: ");
+    Serial.println(millisDifference);
+    Serial.print("millis error: ");
+    Serial.print(errorFraction / 10000U);
+    Serial.print(".");
+    const uint32_t errorFractionRemainder = errorFraction % 10000U;
+    if (errorFractionRemainder < 1000U)
+    {
+        Serial.print("0");
+    }
+    if (errorFractionRemainder < 100U)
+    {
+        Serial.print("0");
+    }
+    if (errorFractionRemainder < 10U)
+    {
+        Serial.print("0");
+    }
+    Serial.println(errorFractionRemainder);
     Serial.print("stopwatch ms: ");
     Serial.println(stopwatchElapsed);
-    Serial.print("difference ms: ");
-    Serial.println(static_cast<int32_t>(stopwatchElapsed - millisElapsed));
+    Serial.print("stopwatch - RTC ms: ");
+    Serial.println(stopwatchDifference);
+    Serial.print("stopwatch display seconds: ");
+    Serial.println(stopwatchElapsed / 1000UL);
 }
 #endif
 
