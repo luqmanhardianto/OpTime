@@ -112,20 +112,11 @@ bool TimeService::isRtcValid() const
 
 uint32_t TimeService::nowMs() const
 {
-    if (scheduler_ != nullptr)
-    {
-        return scheduler_->tick();
-    }
-    return monotonicMs_;
+    return ::millis();
 }
 
 StatusCode TimeService::stopwatchStart()
 {
-    if (scheduler_ == nullptr)
-    {
-        return StatusCode::NOT_READY;
-    }
-
     if (stopwatchState_ == StopwatchState::RUNNING)
     {
         return StatusCode::BUSY;
@@ -390,8 +381,7 @@ void TimeService::refreshStopwatchState()
 
     const uint32_t now = nowMs();
     const uint32_t elapsedMs = now - stopwatchStartMs_;
-    // ponytail: round down to complete seconds only (no milliseconds kept)
-    stopwatchElapsedMs_ = stopwatchAccumulatedMs_ + ((elapsedMs / kSecondTickMs) * kSecondTickMs);
+    stopwatchElapsedMs_ = stopwatchAccumulatedMs_ + elapsedMs;
 
     if (stopwatchElapsedMs_ >= kStopwatchMaxMs)
     {
@@ -419,6 +409,5 @@ void TimeService::refreshCountdownState()
         return;
     }
 
-    // ponytail: round down elapsed to complete seconds only
-    countdownRemainingMs_ = countdownBaseMs_ - ((elapsedMs / kSecondTickMs) * kSecondTickMs);
+    countdownRemainingMs_ = countdownBaseMs_ - elapsedMs;
 }
