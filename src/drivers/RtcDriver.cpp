@@ -2,17 +2,34 @@
 
 #include <Arduino.h>
 
+#include "config/PinConfig.h"
+
 namespace
 {
 constexpr uint8_t kTimeRegisterCount = 7U;
+
+void rtcSqwInterruptHandler()
+{
+    RtcDriver::onSqwInterrupt();
+}
 }
 
-RtcDriver::RtcDriver() : lastStatus_(StatusCode::NOT_READY), initialized_(false), oscillatorStopped_(false) {}
+volatile uint8_t RtcDriver::secondEvents_ = 0U;
+volatile uint32_t RtcDriver::secondEventCount_ = 0U;
+
+RtcDriver::RtcDriver()
+    : lastStatus_(StatusCode::NOT_READY),
+      initialized_(false),
+      oscillatorStopped_(false),
+      sqwConfigured_(false)
+{
+}
 
 StatusCode RtcDriver::begin()
 {
     initialized_ = false;
     oscillatorStopped_ = false;
+    sqwConfigured_ = false;
 
     if (i2cHal_.begin() != StatusCode::OK)
     {
@@ -29,9 +46,56 @@ StatusCode RtcDriver::begin()
     }
 
     oscillatorStopped_ = ((statusValue & kOscillatorStopFlag) != 0U);
+    if (i2cHal_.writeRegister(kRtcAddress, kRegisterControl, 0x00U) != StatusCode::OK)
+    {
+        lastStatus_ = StatusCode::ERROR;
+        return lastStatus_;
+    }
+
+    pinMode(PIN_RTC_SQW, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PIN_RTC_SQW), rtcSqwInterruptHandler, FALLING);
+    secondEvents_ = 0U;
+    secondEventCount_ = 0U;
+    sqwConfigured_ = true;
     initialized_ = true;
     lastStatus_ = oscillatorStopped_ ? StatusCode::NOT_READY : StatusCode::OK;
     return lastStatus_;
+}
+
+bool RtcDriver::consumeSecondEvent()
+{
+    bool available = false;
+    noInterrupts();
+    if (secondEvents_ > 0U)
+    {
+        --secondEvents_;
+        available = true;
+    }
+    interrupts();
+    return available;
+}
+
+bool RtcDriver::isSqwConfigured() const
+{
+    return sqwConfigured_;
+}
+
+uint32_t RtcDriver::secondEventCount() const
+{
+    uint32_t value = 0U;
+    noInterrupts();
+    value = secondEventCount_;
+    interrupts();
+    return value;
+}
+
+void RtcDriver::onSqwInterrupt()
+{
+    if (secondEvents_ < 255U)
+    {
+        ++secondEvents_;
+    }
+    ++secondEventCount_;
 }
 
 StatusCode RtcDriver::read(DateTime& time)

@@ -24,8 +24,13 @@ public:
     StatusCode begin();
     StatusCode read(DateTime& time);
     StatusCode set(const DateTime& time);
+    bool consumeSecondEvent();
     bool isValid();
+    bool isSqwConfigured() const;
+    uint32_t secondEventCount() const;
     uint8_t getStatus();
+
+    static void onSqwInterrupt();
 
 private:
     static constexpr uint8_t kRtcAddress = 0x68U;
@@ -38,6 +43,10 @@ private:
     StatusCode lastStatus_;
     bool initialized_;
     bool oscillatorStopped_;
+    bool sqwConfigured_;
+
+    static volatile uint8_t secondEvents_;
+    static volatile uint32_t secondEventCount_;
 
     static uint8_t bcdToDecimal(uint8_t value);
     static uint8_t decimalToBcd(uint8_t value);

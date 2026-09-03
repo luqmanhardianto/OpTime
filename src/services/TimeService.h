@@ -48,7 +48,8 @@ public:
     StatusCode stopwatchPause();
     StatusCode stopwatchReset();
     StatusCode getStopwatch(TimeValue& value) const;
-    uint32_t stopwatchElapsedMilliseconds() const;
+    uint32_t stopwatchElapsedSeconds() const;
+    void onRtcSecond();
     StopwatchState stopwatchState() const;
 
     StatusCode countdownSet(const TimeValue& value);
@@ -63,10 +64,9 @@ private:
     static constexpr uint32_t kRtcSyncIntervalMs = 1000U;
     static constexpr uint32_t kSecondTickMs = 1000U;
     static constexpr uint32_t kStopwatchMaxSeconds = ((99U * 3600U) + (59U * 60U) + 59U);
-    static constexpr uint32_t kStopwatchMaxMs = kStopwatchMaxSeconds * 1000U;
-
     static uint32_t timeValueToSeconds(const TimeValue& value);
     static void secondsToTimeValue(uint32_t seconds, TimeValue& value);
+    static uint32_t dateTimeToEpochSeconds(const DateTime& time);
     static bool isValidTimeValue(const TimeValue& value);
     static bool isValidDateTime(const DateTime& time);
 
@@ -82,17 +82,17 @@ private:
     bool rtcValid_;
     uint32_t monotonicMs_;
     uint32_t lastRtcSyncMs_;
-    uint32_t lastSecondTickMs_;
+    uint32_t rtcEpochSeconds_;
+    bool rtcReferenceValid_;
 
-    uint32_t stopwatchStartMs_;
-    uint32_t stopwatchAccumulatedMs_;
-    uint32_t stopwatchElapsedMs_;
-    uint32_t stopwatchLastSecondBoundary_;
+    uint32_t stopwatchStartEpochSeconds_;
+    uint32_t stopwatchAccumulatedSeconds_;
+    uint32_t stopwatchElapsedSeconds_;
     StopwatchState stopwatchState_;
 
-    uint32_t countdownInitialMs_;
-    uint32_t countdownRemainingMs_;
-    uint32_t countdownBaseMs_;
-    uint32_t countdownStartMs_;
+    uint32_t countdownInitialSeconds_;
+    uint32_t countdownRemainingSeconds_;
+    uint32_t countdownBaseSeconds_;
+    uint32_t countdownStartEpochSeconds_;
     CountdownState countdownState_;
 };

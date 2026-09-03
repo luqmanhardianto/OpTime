@@ -17,16 +17,16 @@ TimeService::TimeService()
       rtcValid_(false),
       monotonicMs_(0U),
       lastRtcSyncMs_(0U),
-      lastSecondTickMs_(0U),
-      stopwatchStartMs_(0U),
-      stopwatchAccumulatedMs_(0U),
-      stopwatchElapsedMs_(0U),
-      stopwatchLastSecondBoundary_(0U),
+    rtcEpochSeconds_(0U),
+    rtcReferenceValid_(false),
+    stopwatchStartEpochSeconds_(0U),
+    stopwatchAccumulatedSeconds_(0U),
+    stopwatchElapsedSeconds_(0U),
       stopwatchState_(StopwatchState::STOPPED),
-      countdownInitialMs_(0U),
-      countdownRemainingMs_(0U),
-      countdownBaseMs_(0U),
-      countdownStartMs_(0U),
+    countdownInitialSeconds_(0U),
+    countdownRemainingSeconds_(0U),
+    countdownBaseSeconds_(0U),
+    countdownStartEpochSeconds_(0U),
       countdownState_(CountdownState::IDLE)
 {
 }
@@ -40,7 +40,8 @@ StatusCode TimeService::begin(RtcDriver* rtcDriver, Scheduler* scheduler, EventS
     rtcValid_ = false;
     monotonicMs_ = 0U;
     lastRtcSyncMs_ = 0U;
-    lastSecondTickMs_ = 0U;
+    rtcEpochSeconds_ = 0U;
+    rtcReferenceValid_ = false;
 
     stopwatchReset();
     countdownReset();
@@ -68,10 +69,15 @@ void TimeService::update()
         syncRtc();
     }
 
-    while ((uint32_t)(monotonicMs_ - lastSecondTickMs_) >= kSecondTickMs)
+    bool rtcSecondReceived = false;
+    while (rtcDriver_ != nullptr && rtcDriver_->consumeSecondEvent())
     {
-        lastSecondTickMs_ += kSecondTickMs;
-        publishEvent(EventType::SECOND_TICK, EventSource::RTC, static_cast<int16_t>(monotonicMs_));
+        rtcSecondReceived = true;
+    }
+
+    if (rtcSecondReceived)
+    {
+        onRtcSecond();
     }
 
     refreshStopwatchState();
@@ -95,6 +101,8 @@ StatusCode TimeService::setDateTime(const DateTime& time)
     {
         currentTime_ = time;
         rtcValid_ = true;
+        rtcEpochSeconds_ = dateTimeToEpochSeconds(time);
+        rtcReferenceValid_ = true;
     }
     return status;
 }
@@ -127,16 +135,21 @@ StatusCode TimeService::stopwatchStart()
         stopwatchReset();
     }
 
-    stopwatchStartMs_ = nowMs();
-    stopwatchLastSecondBoundary_ = 0U;
+    syncRtc();
+    if (!rtcReferenceValid_)
+    {
+        return StatusCode::NOT_READY;
+    }
+
+    stopwatchStartEpochSeconds_ = rtcEpochSeconds_;
     if (stopwatchState_ == StopwatchState::PAUSED)
     {
         stopwatchState_ = StopwatchState::RUNNING;
         return StatusCode::OK;
     }
 
-    stopwatchAccumulatedMs_ = 0U;
-    stopwatchElapsedMs_ = 0U;
+    stopwatchAccumulatedSeconds_ = 0U;
+    stopwatchElapsedSeconds_ = 0U;
     stopwatchState_ = StopwatchState::RUNNING;
     return StatusCode::OK;
 }
@@ -149,7 +162,9 @@ StatusCode TimeService::stopwatchStop()
         return StatusCode::NOT_READY;
     }
 
-    stopwatchAccumulatedMs_ = stopwatchElapsedMs_;
+    syncRtc();
+    refreshStopwatchState();
+    stopwatchAccumulatedSeconds_ = stopwatchElapsedSeconds_;
     stopwatchState_ = StopwatchState::STOPPED;
     return StatusCode::OK;
 }
@@ -162,17 +177,18 @@ StatusCode TimeService::stopwatchPause()
         return StatusCode::NOT_READY;
     }
 
-    stopwatchAccumulatedMs_ = stopwatchElapsedMs_;
+    syncRtc();
+    refreshStopwatchState();
+    stopwatchAccumulatedSeconds_ = stopwatchElapsedSeconds_;
     stopwatchState_ = StopwatchState::PAUSED;
     return StatusCode::OK;
 }
 
 StatusCode TimeService::stopwatchReset()
 {
-    stopwatchStartMs_ = 0U;
-    stopwatchAccumulatedMs_ = 0U;
-    stopwatchElapsedMs_ = 0U;
-    stopwatchLastSecondBoundary_ = 0U;
+    stopwatchStartEpochSeconds_ = 0U;
+    stopwatchAccumulatedSeconds_ = 0U;
+    stopwatchElapsedSeconds_ = 0U;
     stopwatchState_ = StopwatchState::STOPPED;
     return StatusCode::OK;
 }
@@ -182,7 +198,7 @@ StatusCode TimeService::getStopwatch(TimeValue& value) const
     TimeService* mutableThis = const_cast<TimeService*>(this);
     mutableThis->refreshStopwatchState();
 
-    uint32_t seconds = stopwatchElapsedMs_ / 1000U;
+    uint32_t seconds = stopwatchElapsedSeconds_;
     if (seconds > kStopwatchMaxSeconds)
     {
         seconds = kStopwatchMaxSeconds;
@@ -192,11 +208,18 @@ StatusCode TimeService::getStopwatch(TimeValue& value) const
     return StatusCode::OK;
 }
 
-uint32_t TimeService::stopwatchElapsedMilliseconds() const
+uint32_t TimeService::stopwatchElapsedSeconds() const
 {
     TimeService* mutableThis = const_cast<TimeService*>(this);
     mutableThis->refreshStopwatchState();
-    return stopwatchElapsedMs_;
+    return stopwatchElapsedSeconds_;
+}
+
+void TimeService::onRtcSecond()
+{
+    syncRtc();
+    publishEvent(EventType::SECOND_TICK, EventSource::RTC,
+                 static_cast<int16_t>(rtcEpochSeconds_ & 0x7FFFU));
 }
 
 StopwatchState TimeService::stopwatchState() const
@@ -211,10 +234,10 @@ StatusCode TimeService::countdownSet(const TimeValue& value)
         return StatusCode::INVALID_PARAMETER;
     }
 
-    countdownInitialMs_ = timeValueToSeconds(value) * 1000U;
-    countdownRemainingMs_ = countdownInitialMs_;
-    countdownBaseMs_ = countdownInitialMs_;
-    countdownStartMs_ = nowMs();
+    countdownInitialSeconds_ = timeValueToSeconds(value);
+    countdownRemainingSeconds_ = countdownInitialSeconds_;
+    countdownBaseSeconds_ = countdownInitialSeconds_;
+    countdownStartEpochSeconds_ = rtcEpochSeconds_;
     countdownState_ = CountdownState::IDLE;
     return StatusCode::OK;
 }
@@ -230,17 +253,23 @@ StatusCode TimeService::countdownStart()
     // restarts from that saved value; only countdownReset() clears it.
     if (countdownState_ == CountdownState::COMPLETED)
     {
-        countdownRemainingMs_ = countdownInitialMs_;
+        countdownRemainingSeconds_ = countdownInitialSeconds_;
     }
 
-    if (countdownInitialMs_ == 0U)
+    syncRtc();
+    if (!rtcReferenceValid_)
+    {
+        return StatusCode::NOT_READY;
+    }
+
+    if (countdownInitialSeconds_ == 0U)
     {
         countdownState_ = CountdownState::IDLE;
         return StatusCode::OK;
     }
 
-    countdownBaseMs_ = countdownRemainingMs_;
-    countdownStartMs_ = nowMs();
+    countdownBaseSeconds_ = countdownRemainingSeconds_;
+    countdownStartEpochSeconds_ = rtcEpochSeconds_;
     countdownState_ = CountdownState::RUNNING;
     return StatusCode::OK;
 }
@@ -271,10 +300,10 @@ StatusCode TimeService::countdownPause()
 
 StatusCode TimeService::countdownReset()
 {
-    countdownInitialMs_ = 0U;
-    countdownRemainingMs_ = 0U;
-    countdownBaseMs_ = 0U;
-    countdownStartMs_ = 0U;
+    countdownInitialSeconds_ = 0U;
+    countdownRemainingSeconds_ = 0U;
+    countdownBaseSeconds_ = 0U;
+    countdownStartEpochSeconds_ = 0U;
     countdownState_ = CountdownState::IDLE;
     return StatusCode::OK;
 }
@@ -284,7 +313,7 @@ StatusCode TimeService::getCountdown(TimeValue& value) const
     TimeService* mutableThis = const_cast<TimeService*>(this);
     mutableThis->refreshCountdownState();
 
-    uint32_t seconds = countdownRemainingMs_ / 1000U;
+    uint32_t seconds = countdownRemainingSeconds_;
     secondsToTimeValue(seconds, value);
     return StatusCode::OK;
 }
@@ -306,6 +335,32 @@ void TimeService::secondsToTimeValue(uint32_t seconds, TimeValue& value)
     value.hour = static_cast<uint8_t>((seconds / 3600U) % 100U);
     value.minute = static_cast<uint8_t>((seconds % 3600U) / 60U);
     value.second = static_cast<uint8_t>(seconds % 60U);
+}
+
+uint32_t TimeService::dateTimeToEpochSeconds(const DateTime& time)
+{
+    uint32_t days = 0U;
+    for (uint16_t year = 2000U; year < time.year; ++year)
+    {
+        days += ((year % 4U) == 0U) ? 366U : 365U;
+    }
+
+    static const uint8_t daysInMonth[] = {31U, 28U, 31U, 30U, 31U, 30U,
+                                          31U, 31U, 30U, 31U, 30U, 31U};
+    for (uint8_t month = 1U; month < time.month; ++month)
+    {
+        days += daysInMonth[month - 1U];
+        if (month == 2U && ((time.year % 4U) == 0U))
+        {
+            days++;
+        }
+    }
+
+    days += static_cast<uint32_t>(time.date - 1U);
+    return (days * 86400U) +
+           (static_cast<uint32_t>(time.hour) * 3600U) +
+           (static_cast<uint32_t>(time.minute) * 60U) +
+           static_cast<uint32_t>(time.second);
 }
 
 bool TimeService::isValidTimeValue(const TimeValue& value)
@@ -358,9 +413,14 @@ void TimeService::syncRtc()
 
     const StatusCode status = rtcDriver_->read(currentTime_);
     rtcValid_ = (status == StatusCode::OK) && rtcDriver_->isValid();
-    if (!rtcValid_)
+    if (rtcValid_)
     {
-        currentTime_ = currentTime_;
+        rtcEpochSeconds_ = dateTimeToEpochSeconds(currentTime_);
+        rtcReferenceValid_ = true;
+    }
+    else
+    {
+        rtcReferenceValid_ = false;
     }
 }
 
@@ -382,18 +442,22 @@ void TimeService::refreshStopwatchState()
 {
     if (stopwatchState_ != StopwatchState::RUNNING)
     {
-        stopwatchElapsedMs_ = stopwatchAccumulatedMs_;
+        stopwatchElapsedSeconds_ = stopwatchAccumulatedSeconds_;
         return;
     }
 
-    const uint32_t now = nowMs();
-    const uint32_t elapsedMs = now - stopwatchStartMs_;
-    stopwatchElapsedMs_ = stopwatchAccumulatedMs_ + elapsedMs;
-
-    if (stopwatchElapsedMs_ >= kStopwatchMaxMs)
+    if (!rtcReferenceValid_ || rtcEpochSeconds_ < stopwatchStartEpochSeconds_)
     {
-        stopwatchElapsedMs_ = kStopwatchMaxMs;
-        stopwatchAccumulatedMs_ = stopwatchElapsedMs_;
+        return;
+    }
+
+    stopwatchElapsedSeconds_ = stopwatchAccumulatedSeconds_ +
+                               (rtcEpochSeconds_ - stopwatchStartEpochSeconds_);
+
+    if (stopwatchElapsedSeconds_ >= kStopwatchMaxSeconds)
+    {
+        stopwatchElapsedSeconds_ = kStopwatchMaxSeconds;
+        stopwatchAccumulatedSeconds_ = stopwatchElapsedSeconds_;
         stopwatchState_ = StopwatchState::COMPLETED;
     }
 }
@@ -405,16 +469,19 @@ void TimeService::refreshCountdownState()
         return;
     }
 
-    const uint32_t now = nowMs();
-    const uint32_t elapsedMs = now - countdownStartMs_;
-    
-    if (elapsedMs >= countdownBaseMs_)
+    if (!rtcReferenceValid_ || rtcEpochSeconds_ < countdownStartEpochSeconds_)
     {
-        countdownRemainingMs_ = 0U;
+        return;
+    }
+
+    const uint32_t elapsedSeconds = rtcEpochSeconds_ - countdownStartEpochSeconds_;
+    if (elapsedSeconds >= countdownBaseSeconds_)
+    {
+        countdownRemainingSeconds_ = 0U;
         countdownState_ = CountdownState::COMPLETED;
         publishEvent(EventType::TIMER_STOP, EventSource::TIMER, 0);
         return;
     }
 
-    countdownRemainingMs_ = countdownBaseMs_ - elapsedMs;
+    countdownRemainingSeconds_ = countdownBaseSeconds_ - elapsedSeconds;
 }

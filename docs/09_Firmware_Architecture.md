@@ -207,6 +207,13 @@ delay();
 
 di seluruh firmware.
 
+TimeService menggunakan DS3231 sebagai authoritative second reference untuk
+Stopwatch dan Countdown. Resolusi kedua fungsi adalah satu detik. SQW 1 Hz
+ditangani oleh ISR yang hanya mencatat event; pembacaan I2C dan logika aplikasi
+berjalan di main context. Timer1 tetap independen untuk multiplex display,
+Timer2 untuk scheduler/background tasks, dan `millis()` untuk timing UI atau
+housekeeping non-kritis.
+
 ---
 
 # 7. Scheduler

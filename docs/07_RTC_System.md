@@ -23,7 +23,8 @@
 
 Dokumen ini menjelaskan spesifikasi implementasi Real Time Clock (RTC) menggunakan modul **DS3231** pada proyek Operation Timer.
 
-RTC digunakan sebagai sumber waktu utama (Master Time Reference) untuk seluruh sistem sehingga Clock, Stopwatch, Countdown, dan Scheduler memiliki referensi waktu yang sama.
+RTC digunakan sebagai sumber waktu utama untuk Clock, Stopwatch, dan Countdown.
+Scheduler tetap menggunakan Timer2 untuk penjadwalan periodik.
 
 ---
 
@@ -139,6 +140,10 @@ INPUT_PULLUP
 
 SQW menghasilkan interrupt setiap satu detik.
 
+Firmware menulis control register DS3231 untuk memilih SQW 1 Hz dan menerima
+falling-edge interrupt pada `RTC_SQW`. ISR hanya mencatat event pada counter;
+I2C read, state update, display, buzzer, dan Serial berjalan di main context.
+
 ---
 
 # 7. RTC Driver Responsibilities
@@ -230,9 +235,14 @@ Application
 
 Dengan demikian:
 
-- Clock akurat
-- Stopwatch stabil
-- Countdown stabil
+- Clock menggunakan timestamp DS3231.
+- Stopwatch dan Countdown menggunakan epoch seconds DS3231.
+- `millis()` bukan authoritative timebase untuk Stopwatch atau Countdown.
+- Jika SQW interrupt terlewat, TimeService membaca ulang timestamp RTC secara
+    periodik sebagai rekonsiliasi.
+
+Timer1 tetap menangani multiplex display dan Timer2 tetap menangani scheduler.
+`millis()` hanya digunakan untuk timing UI dan housekeeping non-kritis.
 
 ---
 

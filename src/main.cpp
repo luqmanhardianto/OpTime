@@ -13,7 +13,8 @@
 #include "services/TimeService.h"
 
 #if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
-    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    OPTIME_RTC_TIMING_DIAGNOSTIC
 class DiagnosticSerial
 {
 public:
@@ -122,7 +123,8 @@ public:
 namespace
 {
 #if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
-    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    OPTIME_RTC_TIMING_DIAGNOSTIC
 DiagnosticSerial gDiagnosticSerial;
 #else
 DisabledSerial gDisabledSerial;
@@ -134,7 +136,8 @@ constexpr uint8_t kDisplayBlankDigit = 0xFFU;
 constexpr uint32_t kEditFieldBlinkPeriodMs = 500U;
 TimeService gTimeService;
 #if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
-    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    OPTIME_RTC_TIMING_DIAGNOSTIC
 #define Serial gDiagnosticSerial
 #else
 #define Serial gDisabledSerial
@@ -494,6 +497,10 @@ bool gCountdownCompletionAlarmActive = false;
 uint32_t gCountdownCompletionAlarmStartMs = 0U;
 CountdownState gPreviousCountdownState = CountdownState::IDLE;
 
+#if OPTIME_RTC_TIMING_DIAGNOSTIC
+bool gRtcTimingDiagnosticReported = false;
+#endif
+
 #if OPTIME_MILLIS_RTC_DIAGNOSTIC
 enum class MillisRtcDiagnosticState : uint8_t
 {
@@ -645,8 +652,7 @@ void updateHardwareDisplay()
         gDisplayDriver.setDigit(firstDigit, kDisplayBlankDigit);
         gDisplayDriver.setDigit(firstDigit + 1U, kDisplayBlankDigit);
     }
-    // The colon output is the front-panel tick LED. It shares the Timer2
-    // timebase used by TimeService, Stopwatch, and Countdown.
+    // The colon output is a UI indicator driven by the scheduler.
     gDisplayDriver.setColon((gScheduler.tick() % 1000U) < 500U);
     gDisplayDriver.swapBuffer();
 }
@@ -762,6 +768,30 @@ void processTimer1Diagnostic()
     gScheduler.run();
     gTimeService.update();
 
+#if OPTIME_RTC_TIMING_DIAGNOSTIC
+    if (!gRtcTimingDiagnosticReported && gRtcDriver.secondEventCount() > 0U)
+    {
+        DateTime diagnosticTime;
+        if (gTimeService.getDateTime(diagnosticTime) == StatusCode::OK)
+        {
+            Serial.println("RTC TIMING DIAGNOSTIC");
+            Serial.print("RTC initialized: ");
+            Serial.println(gTimeService.isRtcValid() ? "YES" : "NO");
+            Serial.print("RTC SQW configured: ");
+            Serial.println(gRtcDriver.isSqwConfigured() ? "YES" : "NO");
+            Serial.print("RTC time: ");
+            printTimeHhMmSs(diagnosticTime);
+            Serial.println();
+            Serial.print("RTC 1Hz events: ");
+            Serial.println(gRtcDriver.secondEventCount());
+            Serial.print("Stopwatch seconds: ");
+            Serial.println(gTimeService.stopwatchElapsedSeconds());
+            Serial.println("Countdown seconds: unavailable while not configured");
+            gRtcTimingDiagnosticReported = true;
+        }
+    }
+#endif
+
     if ((uint32_t)(::millis() - gTimer1DiagnosticStartMs) < kTimer1DiagnosticDurationMs)
     {
         return;
@@ -771,7 +801,7 @@ void processTimer1Diagnostic()
     DateTime endRtc = {0U, 0U, 0U, 0U, 1U, 1U, 2000U};
     const bool endRtcValid = (gRtcDriver.read(endRtc) == StatusCode::OK);
     const uint32_t millisElapsed = endMillis - gTimer1DiagnosticStartMs;
-    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedMilliseconds();
+    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedSeconds() * 1000UL;
     const uint32_t rtcElapsedSeconds =
         (gTimer1DiagnosticStartRtcValid && endRtcValid)
             ? timerDiagnosticRtcElapsedSeconds(gTimer1DiagnosticStartRtc, endRtc)
@@ -937,7 +967,7 @@ void processMillisRtcDiagnostic()
 
     const uint32_t endMillis = ::millis();
     const uint32_t millisElapsed = endMillis - gMillisRtcDiagnosticStartMillis;
-    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedMilliseconds();
+    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedSeconds() * 1000UL;
     const uint32_t rtcElapsedMs = rtcElapsedSeconds * 1000UL;
     const int32_t millisDifference = static_cast<int32_t>(millisElapsed - rtcElapsedMs);
     const int32_t stopwatchDifference =

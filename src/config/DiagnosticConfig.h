@@ -20,3 +20,6 @@
 
 // Set to 1 to disable Timer1 during the RTC-vs-millis measurement.
 #define OPTIME_MILLIS_RTC_DIAGNOSTIC_TIMER1_OFF 1
+
+// Report DS3231 SQW timing state once after the first received RTC second.
+#define OPTIME_RTC_TIMING_DIAGNOSTIC 0
