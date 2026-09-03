@@ -34,8 +34,9 @@ void initTimer1ForDisplay()
     // digitalWrite() in the ISR, so the former 128 us period could consume
     // nearly all CPU time and starve boot, Serial, and button handling.
     OCR1A = 249U;
+    OCR1B = 186U;
     TIFR1 = _BV(OCF1A);
-    TIMSK1 = _BV(OCIE1A);
+    TIMSK1 = _BV(OCIE1A) | _BV(OCIE1B);
     TCCR1B = _BV(WGM12) | _BV(CS11) | _BV(CS10);
     interrupts();
 }
@@ -49,12 +50,19 @@ ISR(TIMER1_COMPA_vect)
     }
 }
 
+ISR(TIMER1_COMPB_vect)
+{
+    if (gDisplayDriver != nullptr)
+    {
+        gDisplayDriver->refreshBrightnessISR();
+    }
+}
+
 StatusCode DisplayDriver::begin()
 {
     initialized_ = false;
     currentDigit_ = 0U;
-    refreshCounter_ = 0U;
-    brightnessLevel_ = 100U;
+    brightnessLevel_ = 75U;
     colonEnabled_ = false;
 
     for (uint8_t i = 0; i < kBufferSize; ++i)
@@ -197,7 +205,6 @@ void DisplayDriver::refreshDirect()
     {
         index = 0U;
         currentDigit_ = 0U;
-        refreshCounter_ = 0U;
     }
 
     const uint8_t digitValue = frontBuffer_[index];
@@ -214,29 +221,29 @@ void DisplayDriver::refreshDirect()
     shiftRegister_.shiftOut(segmentData, digitData);
     shiftRegister_.latch();
 
-    // Apply brightness control via duty cycle
-    // Only enable display if within brightness threshold
-    // Brightness = (refreshCounter < kBufferSize * brightnessLevel / 100) ? ON : OFF
-    uint16_t brightnessCycles = (static_cast<uint16_t>(kBufferSize) * brightnessLevel_) / 100U;
-    if (refreshCounter_ < brightnessCycles)
+    if (brightnessLevel_ > 0U)
     {
         shiftRegister_.setOutputEnable(true);
-    }
-    else
-    {
-        shiftRegister_.setOutputEnable(false);
     }
 
     if (currentDigit_ >= (kBufferSize - 1U))
     {
         currentDigit_ = 0U;
-        refreshCounter_ = 0U;
     }
     else
     {
         currentDigit_++;
-        refreshCounter_++;
     }
+}
+
+void DisplayDriver::refreshBrightnessISR()
+{
+    if (!initialized_ || brightnessLevel_ >= 100U)
+    {
+        return;
+    }
+
+    shiftRegister_.setOutputEnable(false);
 }
 
 void DisplayDriver::swapBuffer()

@@ -18,6 +18,7 @@ public:
     void setColon(bool state);
     void clear();
     void refreshISR();
+    void refreshBrightnessISR();
     void refreshDirect();
     void swapBuffer();
     void setBrightness(uint8_t level);
@@ -31,7 +32,6 @@ private:
     ShiftRegisterDriver shiftRegister_;
     uint8_t currentDigit_;
     uint8_t brightnessLevel_;
-    uint8_t refreshCounter_;
     bool colonEnabled_;
     bool initialized_;
 

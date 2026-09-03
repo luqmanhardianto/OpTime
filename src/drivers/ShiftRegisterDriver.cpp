@@ -1,6 +1,7 @@
 #include "drivers/ShiftRegisterDriver.h"
 
 #include <Arduino.h>
+#include <avr/io.h>
 
 #include "config/PinConfig.h"
 
@@ -26,33 +27,54 @@ StatusCode ShiftRegisterDriver::begin()
 
 void ShiftRegisterDriver::shiftOut(uint8_t segmentData, uint8_t digitData)
 {
-    digitalWrite(PIN_SHIFT_LATCH, LOW);
+    PORTB &= static_cast<uint8_t>(~_BV(PB2));
 
     for (uint8_t bit = 0; bit < 8U; ++bit)
     {
         const uint8_t currentBit = (digitData >> bit) & 0x01U;
-        digitalWrite(PIN_SHIFT_DATA, currentBit ? HIGH : LOW);
-        digitalWrite(PIN_SHIFT_CLOCK, HIGH);
-        digitalWrite(PIN_SHIFT_CLOCK, LOW);
+        if (currentBit != 0U)
+        {
+            PORTB |= _BV(PB3);
+        }
+        else
+        {
+            PORTB &= static_cast<uint8_t>(~_BV(PB3));
+        }
+        PORTB |= _BV(PB5);
+        PORTB &= static_cast<uint8_t>(~_BV(PB5));
     }
 
     for (uint8_t bit = 0; bit < 8U; ++bit)
     {
         const uint8_t currentBit = (segmentData >> bit) & 0x01U;
-        digitalWrite(PIN_SHIFT_DATA, currentBit ? HIGH : LOW);
-        digitalWrite(PIN_SHIFT_CLOCK, HIGH);
-        digitalWrite(PIN_SHIFT_CLOCK, LOW);
+        if (currentBit != 0U)
+        {
+            PORTB |= _BV(PB3);
+        }
+        else
+        {
+            PORTB &= static_cast<uint8_t>(~_BV(PB3));
+        }
+        PORTB |= _BV(PB5);
+        PORTB &= static_cast<uint8_t>(~_BV(PB5));
     }
 
-    digitalWrite(PIN_SHIFT_LATCH, HIGH);
+    PORTB |= _BV(PB2);
 }
 
 void ShiftRegisterDriver::latch()
 {
-    digitalWrite(PIN_SHIFT_LATCH, HIGH);
+    PORTB |= _BV(PB2);
 }
 
 void ShiftRegisterDriver::setOutputEnable(bool enable)
 {
-    digitalWrite(PIN_DISPLAY_OE, enable ? LOW : HIGH);
+    if (enable)
+    {
+        PORTB &= static_cast<uint8_t>(~_BV(PB1));
+    }
+    else
+    {
+        PORTB |= _BV(PB1);
+    }
 }
