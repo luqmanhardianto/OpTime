@@ -12,7 +12,8 @@
 #include "scheduler/Scheduler.h"
 #include "services/TimeService.h"
 
-#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
 class DiagnosticSerial
 {
 public:
@@ -120,7 +121,8 @@ public:
 
 namespace
 {
-#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
 DiagnosticSerial gDiagnosticSerial;
 #else
 DisabledSerial gDisabledSerial;
@@ -131,7 +133,8 @@ constexpr uint32_t kCountdownCompletionToneMs = 3000U;
 constexpr uint8_t kDisplayBlankDigit = 0xFFU;
 constexpr uint32_t kEditFieldBlinkPeriodMs = 500U;
 TimeService gTimeService;
-#if OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL
+#if (OPTIME_TIMER1_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL) || \
+    (OPTIME_MILLIS_RTC_DIAGNOSTIC && OPTIME_TIMER1_DIAGNOSTIC_SERIAL)
 #define Serial gDiagnosticSerial
 #else
 #define Serial gDisabledSerial
@@ -491,6 +494,21 @@ bool gCountdownCompletionAlarmActive = false;
 uint32_t gCountdownCompletionAlarmStartMs = 0U;
 CountdownState gPreviousCountdownState = CountdownState::IDLE;
 
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC
+enum class MillisRtcDiagnosticState : uint8_t
+{
+    MEASURING = 0U,
+    COMPLETE,
+    FAILED
+};
+
+MillisRtcDiagnosticState gMillisRtcDiagnosticState = MillisRtcDiagnosticState::MEASURING;
+DateTime gMillisRtcDiagnosticStartRtc = {0U, 0U, 0U, 0U, 1U, 1U, 2000U};
+uint32_t gMillisRtcDiagnosticStartMillis = 0U;
+uint32_t gMillisRtcDiagnosticLastPollMillis = 0U;
+constexpr uint32_t kMillisRtcDiagnosticPollIntervalMs = 250U;
+#endif
+
 #if OPTIME_TIMER1_DIAGNOSTIC
 enum class Timer1DiagnosticState : uint8_t
 {
@@ -815,6 +833,150 @@ void processTimer1Diagnostic()
 }
 #endif
 
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC
+uint32_t diagnosticDaysInMonth(const uint16_t year, const uint8_t month)
+{
+    static const uint8_t daysInMonth[] = {31U, 28U, 31U, 30U, 31U, 30U,
+                                           31U, 31U, 30U, 31U, 30U, 31U};
+    if (month == 2U && ((year % 4U) == 0U))
+    {
+        return 29U;
+    }
+    return daysInMonth[month - 1U];
+}
+
+uint32_t diagnosticDateToDays(const DateTime& time)
+{
+    uint32_t days = 0U;
+    for (uint16_t year = 2000U; year < time.year; ++year)
+    {
+        days += ((year % 4U) == 0U) ? 366U : 365U;
+    }
+    for (uint8_t month = 1U; month < time.month; ++month)
+    {
+        days += diagnosticDaysInMonth(time.year, month);
+    }
+    return days + static_cast<uint32_t>(time.date - 1U);
+}
+
+uint32_t diagnosticRtcElapsedSeconds(const DateTime& start, const DateTime& end)
+{
+    const uint32_t startDay = diagnosticDateToDays(start);
+    const uint32_t endDay = diagnosticDateToDays(end);
+    const uint32_t startSeconds = (startDay * 86400UL) +
+                                  (static_cast<uint32_t>(start.hour) * 3600UL) +
+                                  (static_cast<uint32_t>(start.minute) * 60UL) +
+                                  start.second;
+    const uint32_t endSeconds = (endDay * 86400UL) +
+                                (static_cast<uint32_t>(end.hour) * 3600UL) +
+                                (static_cast<uint32_t>(end.minute) * 60UL) +
+                                end.second;
+    return endSeconds - startSeconds;
+}
+
+void beginMillisRtcDiagnostic()
+{
+    gSystemEnabled = true;
+    (void)gModeManager.setMode(ot::AppMode::STOPWATCH);
+    (void)gTimeService.stopwatchReset();
+
+    if (gRtcDriver.read(gMillisRtcDiagnosticStartRtc) != StatusCode::OK)
+    {
+        gMillisRtcDiagnosticState = MillisRtcDiagnosticState::FAILED;
+        return;
+    }
+
+    gMillisRtcDiagnosticStartMillis = ::millis();
+    (void)gTimeService.stopwatchStart();
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC_TIMER1_OFF
+    gDisplayDriver.disableRefresh();
+#endif
+    gMillisRtcDiagnosticLastPollMillis = gMillisRtcDiagnosticStartMillis;
+    gMillisRtcDiagnosticState = MillisRtcDiagnosticState::MEASURING;
+
+    Serial.println("ATmega328P clock diagnostic");
+    Serial.print("F_CPU: ");
+    Serial.println(F_CPU);
+    Serial.print("Clock source: ");
+    Serial.println("UNKNOWN - verify hardware");
+    Serial.print("RTC start: ");
+    printTimeHhMmSs(gMillisRtcDiagnosticStartRtc);
+    Serial.println();
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC_TIMER1_OFF
+    Serial.println("Timer1: DISABLED");
+#else
+    Serial.println("Timer1: ENABLED");
+#endif
+}
+
+void processMillisRtcDiagnostic()
+{
+    gScheduler.run();
+    gTimeService.update();
+
+    const uint32_t nowMillis = ::millis();
+    if ((uint32_t)(nowMillis - gMillisRtcDiagnosticLastPollMillis) <
+        kMillisRtcDiagnosticPollIntervalMs)
+    {
+        return;
+    }
+    gMillisRtcDiagnosticLastPollMillis = nowMillis;
+
+    DateTime endRtc = {0U, 0U, 0U, 0U, 1U, 1U, 2000U};
+    if (gRtcDriver.read(endRtc) != StatusCode::OK)
+    {
+        return;
+    }
+
+    const uint32_t rtcElapsedSeconds =
+        diagnosticRtcElapsedSeconds(gMillisRtcDiagnosticStartRtc, endRtc);
+    if (rtcElapsedSeconds < OPTIME_MILLIS_RTC_DIAGNOSTIC_DURATION_SECONDS)
+    {
+        return;
+    }
+
+    const uint32_t endMillis = ::millis();
+    const uint32_t millisElapsed = endMillis - gMillisRtcDiagnosticStartMillis;
+    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedMilliseconds();
+    const uint32_t rtcElapsedMs = rtcElapsedSeconds * 1000UL;
+    const int32_t millisDifference = static_cast<int32_t>(millisElapsed - rtcElapsedMs);
+    const int32_t stopwatchDifference =
+        static_cast<int32_t>(stopwatchElapsed - rtcElapsedMs);
+
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC_TIMER1_OFF
+    gDisplayDriver.enableRefresh();
+#endif
+    gMillisRtcDiagnosticState = MillisRtcDiagnosticState::COMPLETE;
+    updateHardwareDisplay();
+
+    Serial.println("=== MILLIS vs RTC ===");
+    Serial.print("RTC start: ");
+    printTimeHhMmSs(gMillisRtcDiagnosticStartRtc);
+    Serial.println();
+    Serial.print("RTC end: ");
+    printTimeHhMmSs(endRtc);
+    Serial.println();
+    Serial.println("RTC resolution: +/-1 second");
+    Serial.print("RTC elapsed: ");
+    Serial.print(rtcElapsedSeconds);
+    Serial.println(" s");
+    Serial.print("millis elapsed: ");
+    Serial.print(millisElapsed);
+    Serial.println(" ms");
+    Serial.print("difference: ");
+    Serial.print(millisDifference);
+    Serial.println(" ms");
+    Serial.print("stopwatch elapsed: ");
+    Serial.print(stopwatchElapsed);
+    Serial.println(" ms");
+    Serial.print("stopwatch - RTC: ");
+    Serial.print(stopwatchDifference);
+    Serial.println(" ms");
+    Serial.print("stopwatch display seconds: ");
+    Serial.println(stopwatchElapsed / 1000UL);
+}
+#endif
+
 void setSystemOff()
 {
     gSystemEnabled = false;
@@ -869,7 +1031,9 @@ void setup()
     (void)gTimeService.begin(&gRtcDriver, &gScheduler, &gEventSystem);
 
     setSystemOff();
-#if OPTIME_TIMER1_DIAGNOSTIC
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC
+    beginMillisRtcDiagnostic();
+#elif OPTIME_TIMER1_DIAGNOSTIC
     beginTimer1Diagnostic();
 #endif
     Serial.println("Waiting for POWER button to activate system...");
@@ -877,7 +1041,13 @@ void setup()
 
 void loop()
 {
-#if OPTIME_TIMER1_DIAGNOSTIC
+#if OPTIME_MILLIS_RTC_DIAGNOSTIC
+    if (gMillisRtcDiagnosticState == MillisRtcDiagnosticState::MEASURING)
+    {
+        processMillisRtcDiagnostic();
+        return;
+    }
+#elif OPTIME_TIMER1_DIAGNOSTIC
     if (gTimer1DiagnosticState == Timer1DiagnosticState::MEASURING)
     {
         processTimer1Diagnostic();
