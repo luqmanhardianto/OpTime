@@ -48,6 +48,7 @@ public:
     StatusCode stopwatchPause();
     StatusCode stopwatchReset();
     StatusCode getStopwatch(TimeValue& value) const;
+    uint32_t stopwatchElapsedMilliseconds() const;
     StopwatchState stopwatchState() const;
 
     StatusCode countdownSet(const TimeValue& value);

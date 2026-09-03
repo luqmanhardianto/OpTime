@@ -192,6 +192,13 @@ StatusCode TimeService::getStopwatch(TimeValue& value) const
     return StatusCode::OK;
 }
 
+uint32_t TimeService::stopwatchElapsedMilliseconds() const
+{
+    TimeService* mutableThis = const_cast<TimeService*>(this);
+    mutableThis->refreshStopwatchState();
+    return stopwatchElapsedMs_;
+}
+
 StopwatchState TimeService::stopwatchState() const
 {
     return stopwatchState_;

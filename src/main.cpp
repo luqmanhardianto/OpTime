@@ -26,14 +26,18 @@ public:
 
 namespace
 {
+#if !OPTIME_TIMER1_DIAGNOSTIC || !OPTIME_TIMER1_DIAGNOSTIC_SERIAL
 DisabledSerial gDisabledSerial;
+#endif
 const uint8_t kPowerLedPin = Board::Pin::POWER_LED;
 const uint8_t kBuzzerPin = Board::Pin::BUZZER;
 constexpr uint32_t kCountdownCompletionToneMs = 3000U;
 constexpr uint8_t kDisplayBlankDigit = 0xFFU;
 constexpr uint32_t kEditFieldBlinkPeriodMs = 500U;
 TimeService gTimeService;
+#if !OPTIME_TIMER1_DIAGNOSTIC || !OPTIME_TIMER1_DIAGNOSTIC_SERIAL
 #define Serial gDisabledSerial
+#endif
 
 const char* modeName(const ot::AppMode mode)
 {
@@ -398,7 +402,7 @@ enum class Timer1DiagnosticState : uint8_t
 
 Timer1DiagnosticState gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
 uint32_t gTimer1DiagnosticStartMs = 0U;
-constexpr uint32_t kTimer1DiagnosticDurationMs = 60000UL;
+constexpr uint32_t kTimer1DiagnosticDurationMs = OPTIME_TIMER1_DIAGNOSTIC_DURATION_MS;
 #endif
 
 // Stopwatch value tracking for precise serial print timing
@@ -596,9 +600,20 @@ void beginTimer1Diagnostic()
     (void)gModeManager.setMode(ot::AppMode::STOPWATCH);
     (void)gTimeService.stopwatchReset();
     (void)gTimeService.stopwatchStart();
+#if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
     gDisplayDriver.disableRefresh();
+#endif
     gTimer1DiagnosticStartMs = ::millis();
     gTimer1DiagnosticState = Timer1DiagnosticState::MEASURING;
+
+    Serial.println("TIMER1 DIAGNOSTIC START");
+    Serial.print("F_CPU = ");
+    Serial.println(F_CPU);
+#if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
+    Serial.println("Timer1 = OFF");
+#else
+    Serial.println("Timer1 = ON");
+#endif
 }
 
 void processTimer1Diagnostic()
@@ -611,9 +626,24 @@ void processTimer1Diagnostic()
         return;
     }
 
+    const uint32_t millisElapsed = ::millis() - gTimer1DiagnosticStartMs;
+    const uint32_t stopwatchElapsed = gTimeService.stopwatchElapsedMilliseconds();
+
+#if OPTIME_TIMER1_DIAGNOSTIC_TIMER1_OFF
     gDisplayDriver.enableRefresh();
+#endif
     gTimer1DiagnosticState = Timer1DiagnosticState::COMPLETE;
     updateHardwareDisplay();
+
+    Serial.println("DIAGNOSTIC");
+    Serial.print("Expected ms: ");
+    Serial.println(kTimer1DiagnosticDurationMs);
+    Serial.print("millis ms: ");
+    Serial.println(millisElapsed);
+    Serial.print("stopwatch ms: ");
+    Serial.println(stopwatchElapsed);
+    Serial.print("difference ms: ");
+    Serial.println(static_cast<int32_t>(stopwatchElapsed - millisElapsed));
 }
 #endif
 
