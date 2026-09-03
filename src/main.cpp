@@ -1187,8 +1187,9 @@ void loop()
                 }
                 else
                 {
-                    (void)gTimeService.stopwatchStart();
-                    Serial.println("STOPWATCH started");
+                    const StatusCode status = gTimeService.stopwatchStart();
+                    Serial.println(status == StatusCode::OK ? "STOPWATCH started"
+                                                            : "STOPWATCH start failed: RTC not ready");
                 }
                 continue;
             }
@@ -1238,9 +1239,16 @@ void loop()
                     }
                     else
                     {
-                        (void)gTimeService.countdownStart();
-                        Serial.println(state == CountdownState::PAUSED ? "COUNTDOWN resumed"
-                                                                        : "COUNTDOWN started");
+                        const StatusCode status = gTimeService.countdownStart();
+                        if (status == StatusCode::OK)
+                        {
+                            Serial.println(state == CountdownState::PAUSED ? "COUNTDOWN resumed"
+                                                                            : "COUNTDOWN started");
+                        }
+                        else
+                        {
+                            Serial.println("COUNTDOWN start failed: RTC not ready");
+                        }
                     }
                     continue;
                 }

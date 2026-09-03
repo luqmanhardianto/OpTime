@@ -46,6 +46,14 @@ StatusCode RtcDriver::begin()
     }
 
     oscillatorStopped_ = ((statusValue & kOscillatorStopFlag) != 0U);
+    // Acknowledge a stale OSF flag after the RTC has responded successfully.
+    // The clock is now running and its current value remains the source of truth.
+    if (i2cHal_.writeRegister(kRtcAddress, kRegisterStatus, 0x00U) != StatusCode::OK)
+    {
+        lastStatus_ = StatusCode::ERROR;
+        return lastStatus_;
+    }
+    oscillatorStopped_ = false;
     if (i2cHal_.writeRegister(kRtcAddress, kRegisterControl, 0x00U) != StatusCode::OK)
     {
         lastStatus_ = StatusCode::ERROR;
@@ -157,6 +165,7 @@ StatusCode RtcDriver::set(const DateTime& time)
     }
 
     oscillatorStopped_ = false;
+    (void)i2cHal_.writeRegister(kRtcAddress, kRegisterStatus, 0x00U);
     lastStatus_ = StatusCode::OK;
     return lastStatus_;
 }
