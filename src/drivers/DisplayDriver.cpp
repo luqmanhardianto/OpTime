@@ -227,14 +227,15 @@ void DisplayDriver::refreshDirect()
         shiftRegister_.setOutputEnable(false);
     }
 
-    refreshCounter_++;
     if (currentDigit_ >= (kBufferSize - 1U))
     {
         currentDigit_ = 0U;
+        refreshCounter_ = 0U;
     }
     else
     {
         currentDigit_++;
+        refreshCounter_++;
     }
 }
 

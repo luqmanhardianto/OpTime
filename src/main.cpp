@@ -602,7 +602,6 @@ void setup()
     if (gDisplayDriver.begin() == StatusCode::OK)
     {
         gDisplayDriver.enableRefresh();
-        gDisplayDriver.setBrightness(75);
     }
     else
     {
