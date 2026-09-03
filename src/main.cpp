@@ -9,14 +9,30 @@
 #include "scheduler/Scheduler.h"
 #include "services/TimeService.h"
 
+class DisabledSerial
+{
+public:
+    void begin(const uint32_t) {}
+
+    template <typename ValueType>
+    void print(const ValueType&) {}
+
+    void println() {}
+
+    template <typename ValueType>
+    void println(const ValueType&) {}
+};
+
 namespace
 {
+DisabledSerial gDisabledSerial;
 const uint8_t kPowerLedPin = Board::Pin::POWER_LED;
 const uint8_t kBuzzerPin = Board::Pin::BUZZER;
 constexpr uint32_t kCountdownCompletionToneMs = 3000U;
 constexpr uint8_t kDisplayBlankDigit = 0xFFU;
 constexpr uint32_t kEditFieldBlinkPeriodMs = 500U;
 TimeService gTimeService;
+#define Serial gDisabledSerial
 
 const char* modeName(const ot::AppMode mode)
 {
