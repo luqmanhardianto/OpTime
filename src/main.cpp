@@ -1010,6 +1010,8 @@ void processMillisRtcDiagnostic()
 void setSystemOff()
 {
     gSystemEnabled = false;
+    gClockEditing = false;
+    gCountdownEditing = false;
     gCountdownCompletionAlarmActive = false;
     gPreviousCountdownState = CountdownState::IDLE;
     gDisplayDriver.clear();
